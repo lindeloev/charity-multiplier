@@ -1,0 +1,146 @@
+---
+output: 
+  html_document: 
+    toc: yes
+---
+
+```{=html}
+<style type="text/css">
+.main-container {
+  max-width: 700px !important;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+```
+# Re-analysis of Caviola et al. (2020)
+
+This is the analysis underlying the post [The 100x multiplier on effective charities](https://docs.google.com/document/d/1KmfrVB5ZkFBgss1047nhes5R-bwLDFe8Qx5NnLwU8XE/edit?usp=sharing) which is a re-analysis of the data from the [Caviola et al. (2020)](http://journal.sjdm.org/20/200504/jdm200504.pdf) experiment. The authors generously posted the data and analysis scripts [here](https://osf.io/k4zfr/).
+
+The paper itself is purely descriptive and relies mostly on medians. In this re-analysis, we are particularly interested in study 4, wherein experts in charity effectiveness evaluate how much more good the world's most effective charities do compared to an average charity.
+
+## Expert judgments
+
+Let's load the data directly from OSF:
+
+```{r n.rows = 5}
+library(dplyr, warn.conflicts = FALSE)
+
+df_experts = read.csv("https://osf.io/mshfq/download") |>
+  filter(Finished == 1) |>
+  select(ratio, expert)
+```
+
+\
+Looking at the expert's ratings, it's clear that there are a few extreme values:
+
+```{r}
+sort(df_experts$ratio)
+```
+
+Caviola et al. primarily interpreted the median of the full sample, which is a 100x multiplier given the many responses at 100:
+
+```{r}
+median(df_experts$ratio)
+```
+
+We filter out the extreme estimation of 450,000x effectiveness. As it turns out, the data is ok approximated as a log-normal distribution:
+
+```{r}
+log_ratio = log(df_experts$ratio[df_experts$ratio <= 10000])
+hist(log_ratio, breaks = 5, freq = FALSE, main = "log(responses) is normally distributed")
+curve(dnorm(x, mean = mean(log_ratio), sd = sd(log_ratio)), add = TRUE, lwd = 2)
+```
+
+This is not surprising given that this is ratio data.
+
+Side note: If you run this using `breaks = 20`, it's clear that the reference-number effect (also called [Terminal Digit Preference](https://en.wikipedia.org/wiki/Terminal_digit_preference)) plays a major role (the tendency to choose 10, 50, 100, 1,000, etc.). But since this is probably more a feature of the experts' uncertainty than a true feature of the distribution of their underlying evaluation of the multiplier, we continue with the log-normal assumption. Actually, the 450,000x multiplier is not too unlikely under this distribution, but we leave it out anyway.
+
+We can now compute the mean of this distribution, which is $\exp\left(\mu+\frac{\sigma^2}{2}\right)$ (see [Wikipedia](https://en.wikipedia.org/wiki/Log-normal_distribution)). First using all data, we get this multiplier:
+
+```{r}
+log_mean = function(x) exp(mean(x) + sd(x)^2/2)
+log_mean(log_ratio)
+```
+
+Let's try to focus in on data that is from the best within the expert-group (level 4 and 5 only) and excludes the highest judgments (\> 1000x multiplier)
+
+```{r}
+log_ratio_conservative = log(df_experts$ratio[df_experts$expert >= 4 & df_experts$ratio <= 1000])
+log_mean(log_ratio_conservative)
+```
+
+## Expert judgments: extra analyses
+
+Above, we lumped expert level 4-5 together in the last analysis. If is clear that the higher the expertise, the higher one judges the ratio. This aligns well with the data from the other experiments, where laypeople think the multiplier is 2x and the EA-community think it is \~50.
+
+```{r}
+df_experts |>
+  filter(ratio <= 10000) %>%
+  group_by(is_top_expert = expert %in% c(4, 5)) %>%
+  summarise(
+    N_participants = n(),
+    median = median(ratio),
+    mean = log_mean(log(ratio))
+  )
+
+```
+
+## Lay people's judgments
+
+Let's get the data from OSF. There's a treasure trove of data in these tables, but for now let's focus on the ratio as judged via the tipping point since that's the only one available in both:
+
+```{r}
+# MTurk: lay people
+df_mturk = read.csv("https://osf.io/6tdmf/download", sep = ";") |>
+  #select(ratio = ExplicitComparison) |>
+  mutate(
+    ratio = Tipping_point / 1000,
+    sample = "mturk"
+  ) |>
+  select(ratio, sample)
+
+# Oxford students
+df_oxford = read.csv("https://osf.io/vmrus/download") |>
+  filter(is.na(EG) == FALSE) |>
+  mutate(
+    ratio = EG / 1000,
+    sample = "oxford students"
+  ) |>
+  select(ratio, sample)
+
+# Bind them together
+df_both = bind_rows(df_mturk, df_oxford)
+```
+
+Here is their judgment:
+
+```{r}
+# remove misunderstandings (<1) and one extreme response
+log_lay = log(df_both$ratio[df_both$ratio <= 5000 & df_both$ratio >= 1])
+
+log_mean(log_lay)
+```
+
+And a visual presentation of how many participants reported below a particular number:
+
+```{r}
+library(ggplot2)
+df_both |>
+  # Compute the proportion of responss below each of these thresholds per group
+  tidyr::expand_grid(cutoff = c(1, 2, 3, 5, Inf)) |>
+  group_by(sample, cutoff) |>
+  summarise(
+    proportion = sum(ratio <= cutoff) / n(),
+    cutoff = paste0("<=", first(cutoff)),
+    .groups = "drop"
+  ) |>
+  
+  # Plot it
+  ggplot(aes(x = cutoff, y = proportion)) +
+  geom_col() +
+  facet_wrap(~sample) +
+  scale_y_continuous(labels = scales::percent_format(), breaks = seq(0, 1, 0.2)) +
+  labs(x = "Estimated multiplier", y = "Percentage of respondents", title = "Public perception of effectiveness") +
+  theme_gray(15)
+```
