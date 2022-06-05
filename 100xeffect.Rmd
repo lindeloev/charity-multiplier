@@ -101,8 +101,7 @@ df_mturk = read.csv("https://osf.io/6tdmf/download", sep = ";") |>
   mutate(
     ratio = Tipping_point / 1000,
     sample = "mturk"
-  ) |>
-  select(ratio, sample)
+  )
 
 # Oxford students
 df_oxford = read.csv("https://osf.io/vmrus/download") |>
@@ -110,11 +109,13 @@ df_oxford = read.csv("https://osf.io/vmrus/download") |>
   mutate(
     ratio = EG / 1000,
     sample = "oxford students"
-  ) |>
-  select(ratio, sample)
+  )
 
 # Bind them together
-df_both = bind_rows(df_mturk, df_oxford)
+df_both = bind_rows(
+  df_mturk |> select(ratio, sample), 
+  df_oxford |> select(ratio, sample)
+)
 ```
 
 Here is their judgment:
@@ -147,4 +148,48 @@ df_both |>
   scale_y_continuous(labels = scales::percent_format(), breaks = seq(0, 1, 0.2)) +
   labs(x = "Estimated multiplier", y = "Percentage of respondents", title = "Public perception of effectiveness") +
   theme_gray(15)
+```
+
+MTurk respondents also answered how much it would cost for the effective and average charities to save a life. Half of the respondents thought that it would be very cheap (\<\$100 per life) while only 8.6% believed that saving a life was more expensive than the current GiveWell estimate (\$3800).
+
+```{r}
+df_long = df_mturk |>
+  tidyr::pivot_longer(c(High_cost_effec, Low_cost_effec)) |>
+  filter(is.na(value) == FALSE)
+
+# 50% estimate below this value
+median(df_long$value)
+
+1 - sum(df_long$value < 3800, na.rm = TRUE) / nrow(df_long)
+
+```
+
+Let's visualize this:
+
+```{r, fig.height=8, fig.width=7}
+df_cost = df_long |>
+  tidyr::expand_grid(cutoff = c(5, 10, 20, 50, 100, 250, 500, 1000, 5000, Inf)) |>
+  filter(is.na(value) == FALSE) |>
+  group_by(name, cutoff) |>
+  summarise(
+    prop = sum(value <= cutoff) / n(),
+    .groups = "drop"
+  ) |>
+  ungroup() |>
+  mutate(
+    cutoff = as.factor(cutoff),
+    cutoff = paste0("<=", cutoff) |> forcats::fct_inorder(),
+    name = case_when(
+      name == "High_cost_effec" ~ "Effective charity",
+      TRUE ~ "Average charity"
+    )
+  )
+
+ggplot(df_cost, aes(x = cutoff, y = prop)) + 
+  geom_col() + 
+  geom_vline(xintercept = 8.76, lty = 2, col = "red") +  # Hack to show around $3800
+  facet_wrap(~name, ncol = 1) + 
+  scale_y_continuous(labels = scales::percent_format()) + 
+  labs(x = "Cost to save a life in USD", y = "Percentage of respondents", title = "MTurk: How much does it cost to save a statistical life?", subtitle = "The red line is the current GiveWell estimate ($3800)") + 
+  theme_grey(13)
 ```
