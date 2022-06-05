@@ -44,12 +44,12 @@ Caviola et al. primarily interpreted the median of the full sample, which is a 1
 median(df_experts$ratio)
 ```
 
-We filter out the extreme estimation of 450,000x effectiveness. As it turns out, the data is ok approximated as a log-normal distribution:
+We filter out the extreme estimation of 450,000x effectiveness and the erroneous one at 0.25. As it turns out, the data is ok approximated as a log-normal distribution:
 
 ```{r}
-log_ratio = log(df_experts$ratio[df_experts$ratio <= 10000])
-hist(log_ratio, breaks = 5, freq = FALSE, main = "log(responses) is normally distributed")
-curve(dnorm(x, mean = mean(log_ratio), sd = sd(log_ratio)), add = TRUE, lwd = 2)
+log_ratio_all = log(df_experts$ratio)
+hist(log_ratio_all, breaks = 7, freq = FALSE, main = "log(responses) is normally distributed", ylim = c(0, 0.2))
+curve(dnorm(x, mean = mean(log_ratio_all), sd = sd(log_ratio_all)), add = TRUE, lwd = 2)
 ```
 
 This is not surprising given that this is ratio data.
@@ -60,13 +60,17 @@ We can now compute the mean of this distribution, which is $\exp\left(\mu+\frac{
 
 ```{r}
 log_mean = function(x) exp(mean(x) + sd(x)^2/2)
+log_ratio = log(df_experts$ratio[df_experts$ratio >= 1 & df_experts$ratio <= 10000])
 log_mean(log_ratio)
 ```
 
 Let's try to focus in on data that is from the best within the expert-group (level 4 and 5 only) and excludes the highest judgments (\> 1000x multiplier)
 
 ```{r}
-log_ratio_conservative = log(df_experts$ratio[df_experts$expert >= 4 & df_experts$ratio <= 1000])
+log_ratio_topexperts = log(df_experts$ratio[df_experts$expert >= 4 & df_experts$ratio >= 1 & df_experts$ratio <= 10000])
+log_mean(log_ratio_topexperts)
+
+log_ratio_conservative = log(df_experts$ratio[df_experts$expert >= 4 & df_experts$ratio >= 1 & df_experts$ratio <= 1000])
 log_mean(log_ratio_conservative)
 ```
 
@@ -76,7 +80,7 @@ Above, we lumped expert level 4-5 together in the last analysis. If is clear tha
 
 ```{r}
 df_experts |>
-  filter(ratio <= 10000) %>%
+  filter(ratio >= 1, ratio <= 10000) %>%
   group_by(is_top_expert = expert %in% c(4, 5)) %>%
   summarise(
     N_participants = n(),
